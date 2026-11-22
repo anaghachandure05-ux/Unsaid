@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unsaid — Admin</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/admin">Unsaid Admin</a>
+    <div class="nav-actions">
+      <span id="whoAmI" class="muted"></span>
+      <button id="logoutBtn" class="btn btn-secondary" type="button">Log Out</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="card">
+      <h2>Conversations</h2>
+      <p class="muted">Select a user on the left to view messages and reply.</p>
+
+      <div class="admin-grid">
+        <div>
+          <h3 style="font-size:1rem;">Users</h3>
+          <div id="userList" class="user-list">
+            <p class="muted">Loading users...</p>
+          </div>
+        </div>
+
+        <div>
+          <h3 id="chatTitle" style="font-size:1rem;">Select a user</h3>
+          <div id="adminMessagesBox" class="messages-box">
+            <p class="muted">No user selected.</p>
+          </div>
+
+          <form id="replyForm" style="display:none;">
+            <div class="field">
+              <label for="replyInput">Reply to user</label>
+              <textarea id="replyInput" maxlength="5000" placeholder="Write a reply..." required></textarea>
+            </div>
+            <button class="btn" type="submit">Send Reply</button>
+            <div id="errorBox" class="error-msg"></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script>
+    let selectedUserId = null;
+    const userListEl = document.getElementById("userList");
+    const chatTitleEl = document.getElementById("chatTitle");
+    const messagesBoxEl = document.getElementById("adminMessagesBox");
+    const replyForm = document.getElementById("replyForm");
+    const replyInput = document.getElementById("replyInput");
+    const errorBox = document.getElementById("errorBox");
+
+    document.getElementById("logoutBtn").addEventListener("click", logoutUser);
+
+    async function loadUsers() {
+      const { ok, data } = await apiRequest("/api/admin/users");
+      if (!ok) {
+        userListEl.innerHTML = `<p class="muted">${escapeHtml(data.error || "Failed to load users")}</p>`;
+        return;
+      }
+      if (!data.users || data.users.length === 0) {
+        userListEl.innerHTML = `<p class="muted">No users yet.</p>`;
+        return;
+      }
+      userListEl.innerHTML = data.users.map(u => {
+        const activeClass = u.id === selectedUserId ? "active" : "";
+        return `
+          <button class="user-item ${activeClass}" type="button" onclick="selectUser('${escapeHtml(u.id)}')">
+            <div style="font-weight:600;">@${escapeHtml(u.username)}</div>
+            <div class="muted" style="font-size:0.8rem;">${u.message_count} messages</div>
+          </button>
+        `;
+      }).join("");
+    }
+
+    async function selectUser(userId) {
+      selectedUserId = userId;
+      errorBox.textContent = "";
+      replyForm.style.display = "block";
+      await loadUsers();
+      await loadUserMessages(userId);
+    }
+
+    async function loadUserMessages(userId) {
+      if (!userId) return;
+      const { ok, data } = await apiRequest(`/api/admin/messages/${encodeURIComponent(userId)}`);
+      if (!ok) {
+        messagesBoxEl.innerHTML = `<p class="muted">${escapeHtml(data.error || "Error loading messages")}</p>`;
+        return;
+      }
+      chatTitleEl.textContent = `Chat with @${data.username || "User"}`;
+      if (!data.messages || data.messages.length === 0) {
+        messagesBoxEl.innerHTML = `<p class="muted">No messages from this user yet.</p>`;
+        return;
+      }
+      messagesBoxEl.innerHTML = data.messages.map(m => {
+        const cls = m.is_from_admin ? "user" : "admin";
+        const sender = m.is_from_admin ? "Admin" : `@${data.username}`;
+        return `
+          <div class="msg ${cls}">
+            <div>${escapeHtml(m.content)}</div>
+            <div class="msg-meta">${sender} · ${escapeHtml(m.created_at || "")}</div>
+          </div>
+        `;
+      }).join("");
+      messagesBoxEl.scrollTop = messagesBoxEl.scrollHeight;
+    }
+
+    (async () => {
+      const me = await getCurrentUser();
+      if (!me.loggedIn || !me.isAdmin) {
+        window.location.href = "/";
+        return;
+      }
+      document.getElementById("whoAmI").textContent = `Admin: @${me.username}`;
+      await loadUsers();
+      setInterval(() => {
+        loadUsers();
+        if (selectedUserId) loadUserMessages(selectedUserId);
+      }, 5000);
+    })();
+
+    replyForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!selectedUserId) return;
+      errorBox.textContent = "";
+      const content = replyInput.value.trim();
+      if (!content) return;
+
+      const { ok, data } = await apiRequest(`/api/admin/messages/${encodeURIComponent(selectedUserId)}`, {
+        method: "POST",
+        body: JSON.stringify({ content })
+      });
+
+      if (!ok) {
+        errorBox.textContent = data.error || "Failed to send reply";
+        return;
+      }
+
+      replyInput.value = "";
+      await loadUserMessages(selectedUserId);
+      await loadUsers();
+    });
+  </script>
+</body>
+</html>
