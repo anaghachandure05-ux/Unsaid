@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unsaid — Messages</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/app">Unsaid</a>
+    <div class="nav-actions">
+      <span id="whoAmI" class="muted"></span>
+      <button id="logoutBtn" class="btn btn-secondary" type="button">Log Out</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="card">
+      <h2>Your Messages</h2>
+      <p class="muted" style="margin-bottom:14px;">Write a message below. Replies from admin will show up here.</p>
+
+      <div id="messagesBox" class="messages-box">
+        <p class="muted">Loading messages...</p>
+      </div>
+
+      <form id="messageForm">
+        <div class="field">
+          <label for="content">New message</label>
+          <textarea id="content" maxlength="5000" placeholder="Type what you want to say..." required></textarea>
+        </div>
+        <button class="btn" type="submit">Send Message</button>
+        <div id="errorBox" class="error-msg"></div>
+      </form>
+    </div>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script>
+    const messagesBox = document.getElementById("messagesBox");
+    const errorBox = document.getElementById("errorBox");
+    const contentInput = document.getElementById("content");
+
+    document.getElementById("logoutBtn").addEventListener("click", logoutUser);
+
+    async function loadMessages() {
+      const { ok, data } = await apiRequest("/api/messages");
+      if (!ok) {
+        messagesBox.innerHTML = `<p class="muted">${escapeHtml(data.error || "Could not load messages")}</p>`;
+        return;
+      }
+      if (!data.messages || data.messages.length === 0) {
+        messagesBox.innerHTML = `<p class="muted">No messages yet. Send the first one below.</p>`;
+        return;
+      }
+      messagesBox.innerHTML = data.messages.map(m => {
+        const cls = m.is_from_admin ? "admin" : "user";
+        const sender = m.is_from_admin ? "Admin" : "You";
+        return `
+          <div class="msg ${cls}">
+            <div>${escapeHtml(m.content)}</div>
+            <div class="msg-meta">${sender} · ${escapeHtml(m.created_at || "")}</div>
+          </div>
+        `;
+      }).join("");
+      messagesBox.scrollTop = messagesBox.scrollHeight;
+    }
+
+    (async () => {
+      const me = await getCurrentUser();
+      if (!me.loggedIn) {
+        window.location.href = "/";
+        return;
+      }
+      if (me.isAdmin) {
+        window.location.href = "/admin";
+        return;
+      }
+      document.getElementById("whoAmI").textContent = `@${me.username}`;
+      await loadMessages();
+      setInterval(loadMessages, 5000);
+    })();
+
+    document.getElementById("messageForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorBox.textContent = "";
+      const content = contentInput.value.trim();
+      if (!content) return;
+
+      const { ok, data } = await apiRequest("/api/messages", {
+        method: "POST",
+        body: JSON.stringify({ content })
+      });
+
+      if (!ok) {
+        errorBox.textContent = data.error || "Failed to send message";
+        return;
+      }
+
+      contentInput.value = "";
+      await loadMessages();
+    });
+  </script>
+</body>
+</html>
